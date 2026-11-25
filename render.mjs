@@ -1,96 +1,104 @@
-// render.mjs — draws the news-image-20261125 entry as a 1024x1024 PNG.
-// Node 22 standard library only. Fully deterministic: no clock, no randomness,
-// no network, no environment-dependent values. Run: node render.mjs
+// render.mjs — The World Gazette, Wednesday 25 November 2026.
+// Draws a 1024x1024 broadsheet front page as entry.png.
+// Pure Node standard library; fully deterministic (no time, no random, no network).
 import { writeFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";
 
 const W = 1024;
 const H = 1024;
-const PAPER = [248, 244, 233];
-const INK = [26, 26, 26];
-const RED = [163, 22, 33];
-const BLUE = [31, 78, 121];
-const GREY = [96, 92, 80];
+const PAPER = [246, 241, 229];
+const INK = [25, 25, 25];
+const RED = [158, 27, 27];
+const BLUE = [30, 77, 123];
+const LIGHTSEA = [198, 218, 230];
+const TEAL = [15, 95, 92];
+const GOLD = [150, 105, 20];
+const GRAY = [96, 92, 82];
 
-const buf = new Uint8Array(W * H * 3);
-for (let i = 0; i < W * H; i++) {
-  buf[i * 3] = PAPER[0];
-  buf[i * 3 + 1] = PAPER[1];
-  buf[i * 3 + 2] = PAPER[2];
-}
-
-function px(x, y, c) {
+const px = new Uint8Array(W * H * 3);
+function set(x, y, c) {
   if (x < 0 || y < 0 || x >= W || y >= H) return;
   const i = (y * W + x) * 3;
-  buf[i] = c[0];
-  buf[i + 1] = c[1];
-  buf[i + 2] = c[2];
+  px[i] = c[0];
+  px[i + 1] = c[1];
+  px[i + 2] = c[2];
 }
-function fillRect(x, y, w, h, c) {
+function rect(x, y, w, h, c) {
   for (let j = y; j < y + h; j++) {
-    for (let i = x; i < x + w; i++) px(i, j, c);
+    for (let i = x; i < x + w; i++) set(i, j, c);
   }
 }
-function hline(x, y, w, c) { fillRect(x, y, w, 1, c); }
-function vline(x, y, h, c) { fillRect(x, y, 1, h, c); }
+function hline(x, y, w, c, t = 1) {
+  rect(x, y, w, t, c);
+}
+function vline(x, y, h, c, t = 1) {
+  rect(x, y, t, h, c);
+}
 function line(x0, y0, x1, y1, c) {
   const dx = Math.abs(x1 - x0);
-  const dy = Math.abs(y1 - y0);
+  const dy = -Math.abs(y1 - y0);
   const sx = x0 < x1 ? 1 : -1;
   const sy = y0 < y1 ? 1 : -1;
-  let err = dx - dy;
+  let err = dx + dy;
   let x = x0;
   let y = y0;
   for (;;) {
-    px(x, y, c);
+    set(x, y, c);
     if (x === x1 && y === y1) break;
     const e2 = 2 * err;
-    if (e2 > -dy) { err -= dy; x += sx; }
-    if (e2 < dx) { err += dx; y += sy; }
+    if (e2 >= dy) {
+      err += dy;
+      x += sx;
+    }
+    if (e2 <= dx) {
+      err += dx;
+      y += sy;
+    }
   }
 }
-function thickLine(x0, y0, x1, y1, c) {
-  line(x0, y0, x1, y1, c);
-  line(x0, y0 + 1, x1, y1 + 1, c);
+function thickLine(x0, y0, x1, y1, w, c) {
+  for (let k = -Math.floor(w / 2); k <= Math.floor(w / 2); k++) {
+    line(x0 + k, y0, x1 + k, y1, c);
+  }
 }
-function poly(points, c) {
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const p of points) {
-    if (p[1] < minY) minY = p[1];
-    if (p[1] > maxY) maxY = p[1];
+function circle(cx, cy, r, c) {
+  for (let y = -r; y <= r; y++) {
+    for (let x = -r; x <= r; x++) {
+      if (x * x + y * y <= r * r) set(cx + x, cy + y, c);
+    }
+  }
+}
+function fillPoly(pts, c) {
+  let minY = 1000000;
+  let maxY = -1000000;
+  for (const p of pts) {
+    minY = Math.min(minY, p[1]);
+    maxY = Math.max(maxY, p[1]);
   }
   for (let y = minY; y <= maxY; y++) {
     const xs = [];
-    for (let i = 0; i < points.length; i++) {
-      const a = points[i];
-      const b = points[(i + 1) % points.length];
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
       if ((a[1] <= y && b[1] > y) || (b[1] <= y && a[1] > y)) {
         xs.push(Math.round(a[0] + ((y - a[1]) * (b[0] - a[0])) / (b[1] - a[1])));
       }
     }
     xs.sort((m, n) => m - n);
     for (let k = 0; k + 1 < xs.length; k += 2) {
-      for (let x = xs[k]; x <= xs[k + 1]; x++) px(x, y, c);
+      for (let x = xs[k]; x <= xs[k + 1]; x++) set(x, y, c);
     }
   }
 }
-function circle(cx, cy, r, c, fill) {
-  for (let y = -r; y <= r; y++) {
-    for (let x = -r; x <= r; x++) {
-      const d = Math.sqrt(x * x + y * y);
-      if (fill ? d <= r : Math.abs(d - r) < 0.9) px(cx + x, cy + y, c);
-    }
+function burst(cx, cy, r, c, n = 12) {
+  for (let k = 0; k < n; k++) {
+    const a = (k * 2 * Math.PI) / n;
+    const len = k % 2 === 0 ? r : Math.round(r * 0.55);
+    line(cx, cy, Math.round(cx + len * Math.cos(a)), Math.round(cy + len * Math.sin(a)), c);
   }
-}
-function rectOutline(x, y, w, h, c) {
-  hline(x, y, w, c);
-  hline(x, y + h - 1, w, c);
-  vline(x, y, h, c);
-  vline(x + w - 1, y, h, c);
 }
 
-// ---- 5x7 bitmap font: each glyph is 7 rows of 5 bits ----
+// 5x7 pixel font, uppercase + digits + punctuation. All copy is set in caps.
 const FONT = {
   A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
   B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
@@ -133,36 +141,43 @@ const FONT = {
   ",": ["00000", "00000", "00000", "00000", "01100", "00100", "01000"],
   ":": ["00000", "01100", "01100", "00000", "01100", "01100", "00000"],
   ";": ["00000", "01100", "01100", "00000", "01100", "00100", "01000"],
-  "'": ["00100", "00100", "01000", "00000", "00000", "00000", "00000"],
-  "-": ["00000", "00000", "00000", "01110", "00000", "00000", "00000"],
-  "(": ["00010", "00100", "01000", "01000", "01000", "00100", "00010"],
-  ")": ["01000", "00100", "00010", "00010", "00010", "00100", "01000"],
-  "%": ["11001", "11010", "00010", "00100", "01000", "01011", "10011"],
-  "/": ["00001", "00010", "00010", "00100", "01000", "01000", "10000"],
-  "&": ["01100", "10010", "10100", "01000", "10101", "10010", "01101"],
   "!": ["00100", "00100", "00100", "00100", "00100", "00000", "00100"],
   "?": ["01110", "10001", "00001", "00110", "00100", "00000", "00100"],
+  "-": ["00000", "00000", "00000", "01110", "00000", "00000", "00000"],
+  "'": ["00100", "00100", "01000", "00000", "00000", "00000", "00000"],
+  '"': ["01010", "01010", "01010", "00000", "00000", "00000", "00000"],
+  "(": ["00010", "00100", "01000", "01000", "01000", "00100", "00010"],
+  ")": ["01000", "00100", "00010", "00010", "00010", "00100", "01000"],
+  "/": ["00001", "00010", "00010", "00100", "01000", "01000", "10000"],
+  "%": ["11001", "11010", "00010", "00100", "01000", "01011", "10011"],
+  "&": ["01100", "10010", "10100", "01000", "10101", "10010", "01101"],
   "+": ["00000", "00100", "00100", "11111", "00100", "00100", "00000"],
   "=": ["00000", "00000", "11111", "00000", "11111", "00000", "00000"],
+  $: ["00100", "01111", "10100", "01110", "00101", "11110", "00100"],
+  "#": ["01010", "01010", "11111", "01010", "11111", "01010", "01010"],
+  "*": ["00000", "10101", "01110", "11111", "01110", "10101", "00000"],
+  "<": ["00010", "00100", "01000", "10000", "01000", "00100", "00010"],
+  ">": ["01000", "00100", "00010", "00001", "00010", "00100", "01000"],
+  "@": ["01110", "10001", "10111", "10101", "10110", "10000", "01110"],
+  _: ["00000", "00000", "00000", "00000", "00000", "00000", "11111"],
 };
-
 function textWidth(s, sc) {
   return s.length * 6 * sc - sc;
 }
 function drawText(s, x, y, sc, c) {
   let cx = x;
-  for (const ch of s.toUpperCase()) {
+  for (const ch of s) {
     const g = FONT[ch] || FONT[" "];
     for (let r = 0; r < 7; r++) {
       for (let col = 0; col < 5; col++) {
-        if (g[r][col] === "1") fillRect(cx + col * sc, y + r * sc, sc, sc, c);
+        if (g[r][col] === "1") rect(cx + col * sc, y + r * sc, sc, sc, c);
       }
     }
     cx += 6 * sc;
   }
 }
-function drawTextC(s, cx, y, sc, c) {
-  drawText(s, Math.round(cx - textWidth(s, sc) / 2), y, sc, c);
+function centerText(s, y, sc, c) {
+  drawText(s, Math.round((W - textWidth(s, sc)) / 2), y, sc, c);
 }
 function wrap(s, maxW, sc) {
   const words = s.split(" ");
@@ -180,190 +195,344 @@ function wrap(s, maxW, sc) {
   if (cur) lines.push(cur);
   return lines;
 }
-function drawPara(s, x, y, maxW, sc, c, leading) {
+function drawPara(s, x, y, maxW, sc, c, lh) {
   const lines = wrap(s, maxW, sc);
-  lines.forEach((ln, i) => drawText(ln, x, y + i * leading, sc, c));
+  lines.forEach((ln, i) => drawText(ln, x, y + i * lh, sc, c));
   return lines.length;
 }
 
-// ================= MASTHEAD =================
-drawTextC("THE GLOBAL CHRONICLE", 512, 30, 7, INK);
-fillRect(36, 96, 952, 3, INK);
-fillRect(36, 102, 952, 1, INK);
-drawTextC("WEDNESDAY 25 NOVEMBER 2026", 512, 114, 2, INK);
-hline(36, 138, 952, GREY);
-
-// ================= LEAD STORY: WAR AT SEA =================
-rectOutline(36, 150, 952, 250, INK);
-drawText("LEAD STORY", 56, 168, 2, RED);
-drawText("WAR AT SEA", 56, 192, 5, INK);
-fillRect(56, 234, 120, 2, RED);
-drawPara(
-  "Ukraine confirmed a drone strike on a Russian cargo ship in the Gulf of Finland, and sank a Russian warship in a Libyan port. Norway urged caution.",
-  56, 246, 560, 2, INK, 18
-);
-// ship pictogram, centred near x=800
-poly([[700, 300], [900, 300], [880, 336], [720, 336]], BLUE);
-vline(800, 214, 86, INK);
-poly([[800, 214], [846, 227], [800, 240]], RED);
-fillRect(856, 226, 24, 7, INK);
-hline(848, 224, 40, INK);
-hline(848, 236, 40, INK);
-hline(695, 350, 60, BLUE);
-hline(775, 350, 70, BLUE);
-hline(860, 350, 55, BLUE);
-hline(710, 362, 70, BLUE);
-hline(800, 362, 60, BLUE);
-hline(880, 362, 45, BLUE);
-
-// ================= MIDDLE ROW =================
-rectOutline(36, 420, 304, 240, INK);
-rectOutline(360, 420, 304, 240, INK);
-rectOutline(684, 420, 304, 240, INK);
-
-// --- Markets ---
-drawText("MARKETS", 52, 436, 2, RED);
-drawText("STOCKS TUMBLE", 52, 458, 3, INK);
-vline(60, 488, 50, INK);
-hline(60, 537, 256, INK);
-thickLine(70, 502, 110, 512, RED);
-thickLine(110, 512, 150, 498, RED);
-thickLine(150, 498, 190, 520, RED);
-thickLine(190, 520, 230, 536, RED);
-thickLine(230, 536, 270, 546, RED);
-drawPara(
-  "Nvidia -6% after +31.5%. Nasdaq -1.5%, Micron -11%, chips -8%. Trump to raise tariffs on China, the EU and 14 nations.",
-  52, 552, 272, 2, INK, 16
-);
-
-// --- Gaza ---
-drawText("GAZA", 376, 436, 2, RED);
-drawText("HAMAS CHIEF", 376, 458, 3, INK);
-drawText("KILLED", 376, 482, 3, INK);
-line(512, 508, 512, 494, RED);
-line(512, 508, 498, 496, RED);
-line(512, 508, 526, 496, RED);
-line(512, 508, 492, 504, RED);
-line(512, 508, 532, 504, RED);
-fillRect(484, 514, 56, 34, INK);
-fillRect(492, 522, 6, 6, PAPER);
-fillRect(506, 522, 6, 6, PAPER);
-fillRect(520, 522, 6, 6, PAPER);
-fillRect(492, 534, 6, 6, PAPER);
-fillRect(506, 534, 6, 6, PAPER);
-fillRect(520, 534, 6, 6, PAPER);
-drawPara(
-  "Israeli airstrike kills Naeem Abu Nahel, Hamas internal security director.",
-  376, 560, 272, 2, INK, 16
-);
-
-// --- Space ---
-drawText("SPACE", 700, 436, 2, RED);
-drawText("FIRST PAKISTANI", 700, 458, 3, INK);
-drawText("IN SPACE", 700, 482, 3, INK);
-poly([[836, 500], [824, 522], [848, 522]], RED);
-fillRect(824, 522, 24, 24, INK);
-circle(836, 534, 4, PAPER, true);
-poly([[824, 540], [812, 554], [824, 548]], INK);
-poly([[848, 540], [860, 554], [848, 548]], INK);
-poly([[829, 546], [836, 560], [843, 546]], RED);
-drawPara(
-  "Muhammad Zeeshan Ali launches aboard Shenzhou-24 to the Tiangong station.",
-  700, 566, 272, 2, INK, 16
-);
-
-// ================= BOTTOM ROW =================
-rectOutline(36, 680, 416, 200, INK);
-rectOutline(472, 680, 516, 200, INK);
-
-// --- Riyadh ---
-drawText("RIYADH", 52, 696, 2, RED);
-drawText("TOWER ATTACK", 52, 718, 3, INK);
-poly([[105, 744], [99, 770], [111, 770]], INK);
-circle(105, 744, 3, RED, true);
-fillRect(82, 768, 46, 92, INK);
-fillRect(90, 780, 8, 8, PAPER);
-fillRect(104, 780, 8, 8, PAPER);
-fillRect(118, 780, 8, 8, PAPER);
-fillRect(90, 796, 8, 8, PAPER);
-fillRect(104, 796, 8, 8, PAPER);
-fillRect(118, 796, 8, 8, PAPER);
-fillRect(90, 812, 8, 8, PAPER);
-fillRect(104, 812, 8, 8, PAPER);
-fillRect(118, 812, 8, 8, PAPER);
-fillRect(90, 828, 8, 8, PAPER);
-fillRect(104, 828, 8, 8, PAPER);
-fillRect(118, 828, 8, 8, PAPER);
-fillRect(90, 844, 8, 8, PAPER);
-fillRect(104, 844, 8, 8, PAPER);
-fillRect(118, 844, 8, 8, PAPER);
-drawPara(
-  "Houthis hit the tallest tower in Riyadh, injuring 11. Saudi strikes killed 17 in Hodeida and 26 in Lahj.",
-  165, 748, 271, 2, INK, 18
-);
-
-// --- Also today ---
-drawText("ALSO TODAY", 488, 696, 2, RED);
-fillRect(488, 712, 118, 2, RED);
-const ALSO = [
-  "RUSSIAN PLANE IN S. KOREA AIR ZONE",
-  "HASINA TO RETURN HOME 16 DEC",
-  "6,500+ ROHINGYA HOME TO MYANMAR IN DEC",
-  "AIDS DEATHS 570,000, LOWEST IN 20+ YRS",
-  "NEPAL QUAKE 5.6",
-  "HUAWEI CONVICTED IN US COURT OVER IRAN",
-  "GIULIANI GETS MEDAL OF FREEDOM",
-  "ENGLAND BEAT AUSTRALIA IN 2ND T20",
-];
-ALSO.forEach((item, i) => {
-  const y = 716 + i * 20;
-  fillRect(488, y + 4, 6, 6, RED);
-  drawText(item, 504, y, 2, INK);
-});
-
-// ================= FOOTER =================
-hline(36, 900, 952, GREY);
-drawTextC("THE GLOBAL CHRONICLE - WEDNESDAY 25 NOVEMBER 2026", 512, 916, 2, INK);
-drawTextC("ALL STORIES AS REPORTED ON 25 NOVEMBER 2026", 512, 944, 1, GREY);
-
-// ================= PNG ENCODE (zlib + CRC32, stdlib only) =================
-const CRC_TABLE = new Int32Array(256);
-for (let n = 0; n < 256; n++) {
-  let c = n;
-  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-  CRC_TABLE[n] = c;
-}
-function crc32(b) {
+// PNG encoder (RGB, filter 0, zlib level 9). Deterministic.
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(buf) {
   let c = 0xffffffff;
-  for (let i = 0; i < b.length; i++) c = CRC_TABLE[(c ^ b[i]) & 0xff] ^ (c >>> 8);
+  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
 }
 function chunk(type, data) {
-  const out = Buffer.alloc(12 + data.length);
-  out.writeUInt32BE(data.length, 0);
-  out.write(type, 4, "ascii");
-  data.copy(out, 8);
-  out.writeUInt32BE(crc32(Buffer.concat([Buffer.from(type, "ascii"), data])), 8 + data.length);
-  return out;
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length, 0);
+  const td = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(td), 0);
+  return Buffer.concat([len, td, crc]);
 }
-const raw = Buffer.alloc(H * (1 + W * 3));
-for (let y = 0; y < H; y++) {
-  raw[y * (1 + W * 3)] = 0;
-  Buffer.from(buf.buffer, y * W * 3, W * 3).copy(raw, y * (1 + W * 3) + 1);
+function encodePNG() {
+  const raw = Buffer.alloc(H * (1 + W * 3));
+  for (let y = 0; y < H; y++) {
+    raw[y * (1 + W * 3)] = 0;
+    raw.set(px.subarray(y * W * 3, (y + 1) * W * 3), y * (1 + W * 3) + 1);
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(W, 0);
+  ihdr.writeUInt32BE(H, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  ihdr[10] = 0;
+  ihdr[11] = 0;
+  ihdr[12] = 0;
+  const idat = deflateSync(raw, { level: 9 });
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", idat),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
 }
-const ihdr = Buffer.alloc(13);
-ihdr.writeUInt32BE(W, 0);
-ihdr.writeUInt32BE(H, 4);
-ihdr[8] = 8;
-ihdr[9] = 2;
-ihdr[10] = 0;
-ihdr[11] = 0;
-ihdr[12] = 0;
-const png = Buffer.concat([
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-  chunk("IHDR", ihdr),
-  chunk("IDAT", deflateSync(raw, { level: 9 })),
-  chunk("IEND", Buffer.alloc(0)),
-]);
-writeFileSync("entry.png", png);
-console.log("wrote entry.png:", png.length, "bytes");
+
+// Pictograms, drawn with the primitives above.
+function drawShip(cx, cy) {
+  // Sea band with three wave lines.
+  rect(cx - 130, cy + 52, 260, 30, LIGHTSEA);
+  for (let r = 0; r < 3; r++) {
+    const wy = cy + 60 + r * 9;
+    for (let x = cx - 130; x < cx + 130; x += 4) {
+      const yy = wy + Math.round(2 * Math.sin((x - cx + r * 23) / 14));
+      set(x, yy, BLUE);
+      set(x + 1, yy, BLUE);
+    }
+  }
+  // Hull: trapezoid, deck containers, mast and flag.
+  fillPoly(
+    [
+      [cx - 105, cy - 4],
+      [cx + 105, cy - 4],
+      [cx + 82, cy + 40],
+      [cx - 82, cy + 40],
+    ],
+    BLUE
+  );
+  rect(cx - 78, cy - 26, 34, 22, RED);
+  rect(cx - 38, cy - 26, 34, 22, GOLD);
+  rect(cx + 2, cy - 26, 34, 22, TEAL);
+  vline(cx - 52, cy - 78, 74, INK, 3);
+  fillPoly(
+    [
+      [cx - 49, cy - 78],
+      [cx - 8, cy - 68],
+      [cx - 49, cy - 58],
+    ],
+    RED
+  );
+  // Drone above the ship: body, arms, four rotors, red light.
+  const dx = cx + 62;
+  const dy = cy - 46;
+  rect(dx - 13, dy - 5, 26, 10, INK);
+  line(dx - 13, dy, dx - 30, dy - 12, INK);
+  line(dx + 13, dy, dx + 30, dy - 12, INK);
+  line(dx - 13, dy, dx - 30, dy + 12, INK);
+  line(dx + 13, dy, dx + 30, dy + 12, INK);
+  circle(dx - 30, dy - 12, 6, INK);
+  circle(dx + 30, dy - 12, 6, INK);
+  circle(dx - 30, dy + 12, 6, INK);
+  circle(dx + 30, dy + 12, 6, INK);
+  circle(dx, dy + 7, 2, RED);
+}
+function drawChart(x, y, w, h) {
+  // Axes.
+  hline(x, y + h - 6, w, INK, 2);
+  vline(x, y, h - 6, INK, 2);
+  // Five descending bars.
+  const bars = [62, 50, 38, 26, 14];
+  const bw = 26;
+  const gap = 12;
+  bars.forEach((bh, i) => {
+    const bx = x + 16 + i * (bw + gap);
+    const col = i < 3 ? BLUE : RED;
+    rect(bx, y + h - 6 - bh, bw, bh, col);
+  });
+  // Red down arrow across the bars.
+  thickLine(x + 14, y + 2, x + w - 26, y + h - 18, 4, RED);
+  fillPoly(
+    [
+      [x + w - 34, y + h - 30],
+      [x + w - 6, y + h - 30],
+      [x + w - 20, y + h - 2],
+    ],
+    RED
+  );
+  drawText("-6-7%", x + w - 62, y + 2, 2, RED);
+}
+function drawBuilding(x, y, w, h) {
+  // Two buildings with lit windows, and a burst above the taller one.
+  rect(x + 8, y + 26, 52, h - 26, INK);
+  rect(x + 72, y + 8, 46, h - 8, BLUE);
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 3; c++) {
+      rect(x + 16 + c * 14, y + 34 + r * 12, 6, 6, PAPER);
+    }
+  }
+  for (let r = 0; r < 5; r++) {
+    for (let c = 0; c < 2; c++) {
+      rect(x + 80 + c * 16, y + 16 + r * 11, 6, 6, PAPER);
+    }
+  }
+  burst(x + 150, y + 12, 14, RED, 10);
+}
+function drawRocket(x, y, w, h) {
+  // Stars, crescent moon, rocket body, nose, fins, flame.
+  const stars = [
+    [x + 8, y + 6],
+    [x + 30, y + 22],
+    [x + 200, y + 8],
+    [x + 222, y + 30],
+    [x + 176, y + 18],
+  ];
+  for (const s of stars) {
+    rect(s[0] - 4, s[1] - 1, 9, 2, INK);
+    rect(s[0] - 1, s[1] - 4, 2, 9, INK);
+  }
+  circle(x + 208, y + 16, 12, GOLD);
+  circle(x + 213, y + 12, 11, PAPER);
+  const cx = x + 110;
+  fillPoly(
+    [
+      [cx - 11, y + 8],
+      [cx + 11, y + 8],
+      [cx, y - 12],
+    ],
+    RED
+  );
+  rect(cx - 11, y + 8, 22, 34, INK);
+  circle(cx, y + 22, 5, PAPER);
+  fillPoly(
+    [
+      [cx - 11, y + 34],
+      [cx - 24, y + 46],
+      [cx - 11, y + 42],
+    ],
+    TEAL
+  );
+  fillPoly(
+    [
+      [cx + 11, y + 34],
+      [cx + 24, y + 46],
+      [cx + 11, y + 42],
+    ],
+    TEAL
+  );
+  fillPoly(
+    [
+      [cx - 7, y + 42],
+      [cx + 7, y + 42],
+      [cx, y + 52],
+    ],
+    GOLD
+  );
+  fillPoly(
+    [
+      [cx - 4, y + 42],
+      [cx + 4, y + 42],
+      [cx, y + 48],
+    ],
+    RED
+  );
+}
+function drawTower(x, y, w, h) {
+  // Tall tower with arched top, floor lines, burst at the crown.
+  const cx = x + 70;
+  rect(cx - 16, y + 10, 32, h - 10, INK);
+  circle(cx, y + 10, 16, INK);
+  rect(cx - 16, y + 10, 32, 6, INK);
+  for (let r = 0; r < 5; r++) {
+    rect(cx - 10, y + 22 + r * 10, 20, 2, PAPER);
+  }
+  rect(cx - 26, y + h - 8, 52, 8, INK);
+  burst(x + 250, y + 18, 10, RED, 10);
+  // Small neighbouring blocks.
+  rect(x + 150, y + 34, 40, h - 34, BLUE);
+  rect(x + 198, y + 46, 30, h - 46, TEAL);
+}
+
+// Panel frame with kicker and rule.
+function panel(x, y, w, h, kicker, kc) {
+  rect(x, y, w, 2, INK);
+  rect(x, y + h - 2, w, 2, INK);
+  rect(x, y, 2, h, INK);
+  rect(x + w - 2, y, 2, h, INK);
+  drawText(kicker, x + 16, y + 12, 2, kc);
+  hline(x + 16, y + 30, w - 32, GRAY, 1);
+}
+
+// ---- Page composition ----
+rect(0, 0, W, H, PAPER);
+// Outer border.
+rect(20, 20, W - 40, 2, INK);
+rect(20, H - 22, W - 40, 2, INK);
+rect(20, 20, 2, H - 40, INK);
+rect(W - 22, 20, 2, H - 40, INK);
+
+// Top strip.
+drawText("VOL. I - NO. 329", 36, 36, 2, INK);
+centerText("WEDNESDAY 25 NOVEMBER 2026", 36, 2, INK);
+drawText("PRICE FREE", 988 - textWidth("PRICE FREE", 2), 36, 2, INK);
+
+// Masthead.
+drawText("THE WORLD GAZETTE", 108, 60, 8, INK);
+hline(34, 126, 956, INK, 3);
+hline(34, 132, 956, INK, 1);
+centerText("THE DAY IN FULL - FIVE STORIES THAT MOVED THE WORLD", 142, 2, INK);
+
+// Lead story: war at sea.
+panel(34, 164, 956, 256, "WAR AT SEA", RED);
+drawShip(190, 300);
+drawPara("UKRAINE SINKS RUSSIAN WARSHIP, HITS CARGO SHIP", 350, 208, 620, 3, INK, 26);
+drawPara(
+  "KYIV CONFIRMED DRONE STRIKES ON A RUSSIAN CARGO SHIP IN THE GULF OF FINLAND AND SANK A RUSSIAN WARSHIP IN A LIBYAN PORT. NORWAY URGED CAUTION AS TENSIONS ROSE AT SEA.",
+  350,
+  272,
+  620,
+  2,
+  INK,
+  18
+);
+drawPara(
+  "THE STRIKES MARK A SHARP ESCALATION OF THE WAR AT SEA.",
+  350,
+  356,
+  620,
+  2,
+  GRAY,
+  18
+);
+
+// Row 2: markets and Gaza.
+panel(34, 434, 470, 232, "MARKETS", RED);
+drawChart(50, 472, 438, 62);
+drawPara("NVIDIA SLIDES 6-7% AFTER 31.5% SURGE", 50, 536, 438, 3, INK, 26);
+drawPara(
+  "NASDAQ -1.5%. MICRON -11%. CHIP INDEX -8%. TRUMP READIED TARIFF HIKES ON CHINA, THE EU AND 14 MORE.",
+  50,
+  594,
+  438,
+  2,
+  INK,
+  17
+);
+panel(520, 434, 470, 232, "GAZA", RED);
+drawBuilding(536, 472, 438, 62);
+drawPara("ISRAELI STRIKE KILLS HAMAS SECURITY CHIEF", 536, 536, 438, 3, INK, 26);
+drawPara(
+  "NAEEM ABU NAHEL, HAMAS INTERNAL SECURITY DIRECTOR, WAS KILLED IN AN ISRAELI AIRSTRIKE IN GAZA.",
+  536,
+  594,
+  438,
+  2,
+  INK,
+  17
+);
+
+// Row 3: space and Riyadh.
+panel(34, 680, 470, 196, "SPACE", RED);
+drawRocket(50, 714, 438, 52);
+drawPara("PAKISTANI ASTRONAUT REACHES TIANGONG", 50, 768, 438, 3, INK, 26);
+drawPara(
+  "MUHAMMAD ZEESHAN ALI, FIRST PAKISTANI ASTRONAUT, FLEW ON SHENZHOU-24 TO TIANGONG.",
+  50,
+  826,
+  438,
+  2,
+  INK,
+  16
+);
+panel(520, 680, 470, 196, "RIYADH", RED);
+drawTower(536, 714, 438, 52);
+drawPara("HOUTHIS HIT RIYADH'S TALLEST TOWER", 536, 768, 438, 3, INK, 26);
+drawPara(
+  "ELEVEN PEOPLE WERE INJURED. SAUDI STRIKES KILLED 17 IN HODEIDA AND 26 IN LAHJ.",
+  536,
+  826,
+  438,
+  2,
+  INK,
+  16
+);
+
+// Also today strip.
+rect(34, 886, 956, 2, INK);
+rect(34, 976, 956, 2, INK);
+drawText("ALSO TODAY", 48, 894, 2, RED);
+hline(48, 912, 928, GRAY, 1);
+drawPara(
+  "RUSSIAN PLANE IN SOUTH KOREA AIR ZONE. HASINA RETURNS 16 DEC. MALAYSIA SENDS 6,500+ ROHINGYA HOME. ENGLAND BEAT AUSTRALIA IN 2ND T20. AIDS DEATHS 570,000 IN 2025, LOWEST IN 20 YEARS. NEPAL QUAKE M5.6. HUAWEI CONVICTED IN US COURT. GIULIANI GIVEN MEDAL OF FREEDOM.",
+  48,
+  918,
+  928,
+  2,
+  INK,
+  14
+);
+
+// Footer.
+centerText("THE WORLD GAZETTE - WEDNESDAY 25 NOVEMBER 2026 - PAGE ONE", 986, 2, GRAY);
+
+const out = encodePNG();
+writeFileSync("entry.png", out);
+console.log("wrote entry.png", out.length, "bytes, 1024x1024");
